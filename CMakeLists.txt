@@ -35,3 +35,4 @@ endfunction()
 
 d8web_example(cube examples/01-cube/main.cpp)      # FFP lighting, vertex colors, culling
 d8web_example(texquad examples/02-texquad/main.cpp) # textures, alpha test, DrawPrimitiveUP
+d8web_example(ui examples/03-ui/main.cpp)           # XYZRHW screen-space UI, alpha blending
