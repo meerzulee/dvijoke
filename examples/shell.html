@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>d8web</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #101116; color: #d8d8e0;
+                 font: 13px/1.4 ui-monospace, monospace; }
+    .wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px; }
+    canvas { background: #000; max-width: 100%; height: auto; border: 1px solid #2a2c38; }
+    #status { color: #8a8fa3; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="status">loading…</div>
+    <canvas id="canvas" width="1280" height="720" oncontextmenu="event.preventDefault()"></canvas>
+  </div>
+  <script>
+    var statusEl = document.getElementById('status');
+    window.addEventListener('error', function(e) {
+      var msg = 'UNCAUGHT: ' + (e.error && e.error.stack ? e.error.stack : e.message);
+      console.error(msg);
+      statusEl.textContent = msg;
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('REJECTION: ' + e.reason);
+      statusEl.textContent = 'REJECTION: ' + e.reason;
+    });
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      print: function(t) { console.log(t); statusEl.textContent = t; },
+      printErr: function(t) { console.error(t); },
+      onAbort: function(w) { console.error('ABORT: ' + w); statusEl.textContent = 'ABORT: ' + w; }
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
