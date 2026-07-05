@@ -22,11 +22,16 @@ if(EMSCRIPTEN)
         "-sGROWABLE_ARRAYBUFFERS=0")
 endif()
 
-# Example: rotating lit cube through pure D3D8 calls
-add_executable(cube examples/01-cube/main.cpp)
-target_link_libraries(cube PRIVATE d8web)
+# Examples, each a self-contained D3D8 program
+function(d8web_example name path)
+    add_executable(${name} ${path})
+    target_link_libraries(${name} PRIVATE d8web)
+    if(EMSCRIPTEN)
+        set_target_properties(${name} PROPERTIES SUFFIX ".html")
+        target_link_options(${name} PRIVATE
+            "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/examples/shell.html")
+    endif()
+endfunction()
 
-if(EMSCRIPTEN)
-    set_target_properties(cube PROPERTIES SUFFIX ".html")
-    target_link_options(cube PRIVATE "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/examples/shell.html")
-endif()
+d8web_example(cube examples/01-cube/main.cpp)      # FFP lighting, vertex colors, culling
+d8web_example(texquad examples/02-texquad/main.cpp) # textures, alpha test, DrawPrimitiveUP
