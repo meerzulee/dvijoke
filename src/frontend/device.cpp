@@ -292,7 +292,6 @@ public:
 
     HRESULT LockRect(UINT level, D3DLOCKED_RECT* locked, const RECT* rect, DWORD flags) override {
         if (!locked || level >= m_levels) return D3DERR_INVALIDCALL;
-        (void)rect;  // whole-surface locks only; partial-rect support when a caller appears
         (void)flags;
         FormatInfo fi{};
         formatInfo(m_format, fi);
@@ -300,6 +299,13 @@ public:
         locked->pBits = m_shadow[level].data();
         locked->Pitch = fi.bytesPerPixel ? INT(w * fi.bytesPerPixel)
                                          : INT(((w + 3) / 4) * (m_format == D3DFMT_DXT1 ? 8 : 16));
+        // Partial lock: pBits must point at the rect origin (D3D contract). The
+        // engine's terrain atlas updates tiles this way. Uncompressed only —
+        // sub-rect DXT locks would need block math and have no caller.
+        if (rect && fi.bytesPerPixel)
+            locked->pBits = m_shadow[level].data() +
+                            size_t(rect->top) * size_t(locked->Pitch) +
+                            size_t(rect->left) * fi.bytesPerPixel;
         m_lockedLevel = level;
         return D3D_OK;
     }
@@ -365,6 +371,10 @@ HRESULT Surface8::LockRect(D3DLOCKED_RECT* locked, const RECT* rect, DWORD flags
     formatInfo(m_format, fi);
     locked->pBits = m_shadow.data();
     locked->Pitch = INT(m_width * (fi.bytesPerPixel ? fi.bytesPerPixel : 4));
+    if (rect && fi.bytesPerPixel)
+        locked->pBits = m_shadow.data() +
+                        size_t(rect->top) * size_t(locked->Pitch) +
+                        size_t(rect->left) * fi.bytesPerPixel;
     return D3D_OK;
 }
 
