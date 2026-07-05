@@ -5,6 +5,8 @@
 
 #include "d3d8types.h"
 
+namespace d8web {
+
 struct IDirect3D8;
 struct IDirect3DDevice8;
 struct IDirect3DTexture8;
@@ -133,5 +135,14 @@ struct IDirect3D8 : IUnknown8 {
                                  D3DPRESENT_PARAMETERS* pp, IDirect3DDevice8** device) = 0;
 };
 
-// Entry point — mirrors Direct3DCreate8(D3D_SDK_VERSION)
-IDirect3D8* Direct3DCreate8(UINT sdkVersion);
+// Entry point
+IDirect3D8* CreateDirect3D8();
+
+}  // namespace d8web
+
+// Global factory mirroring Direct3DCreate8(D3D_SDK_VERSION) for standalone use.
+// The engine bridge defines D8WEB_NO_GLOBAL_FACTORY and provides the real
+// COM-shaped Direct3DCreate8 itself.
+#ifndef D8WEB_NO_GLOBAL_FACTORY
+inline d8web::IDirect3D8* Direct3DCreate8(d8web::UINT) { return d8web::CreateDirect3D8(); }
+#endif

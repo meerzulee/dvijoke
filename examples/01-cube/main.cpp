@@ -5,6 +5,8 @@
 
 #include <d8web/d3d8.h>
 
+using namespace d8web;
+
 #include <cmath>
 #include <cstdio>
 

@@ -6,6 +6,11 @@
 #include <cstdint>
 #include <cstring>
 
+// Everything lives in namespace d8web so these definitions can coexist with a
+// real d3d8.h (DXVK/mingw) in the same translation unit — the engine bridge
+// includes both.
+namespace d8web {
+
 // ---- Windows-ish base types (only what D3D8 signatures need) ----
 using DWORD = uint32_t;
 using WORD = uint16_t;
@@ -24,6 +29,8 @@ using LPVOID = void*;
 
 #ifndef TRUE
 #define TRUE 1
+#endif
+#ifndef FALSE
 #define FALSE 0
 #endif
 
@@ -36,8 +43,12 @@ constexpr HRESULT D3DERR_DEVICELOST = static_cast<HRESULT>(0x88760868);
 constexpr HRESULT D3DERR_DEVICENOTRESET = static_cast<HRESULT>(0x88760869);
 constexpr HRESULT E_FAIL_ = static_cast<HRESULT>(0x80004005);
 
-#define SUCCEEDED(hr) ((HRESULT)(hr) >= 0)
-#define FAILED(hr) ((HRESULT)(hr) < 0)
+#ifndef SUCCEEDED
+#define SUCCEEDED(hr) ((int32_t)(hr) >= 0)
+#endif
+#ifndef FAILED
+#define FAILED(hr) ((int32_t)(hr) < 0)
+#endif
 
 constexpr DWORD D3D_SDK_VERSION = 220;
 constexpr UINT D3DADAPTER_DEFAULT = 0;
@@ -382,3 +393,5 @@ constexpr DWORD D3DPTEXTURECAPS_POW2 = 0x02;
 // Shader version macros — we report 0 to force FFP paths
 constexpr DWORD D3DVS_VERSION(BYTE major, BYTE minor) { return 0xFFFE0000u | (DWORD(major) << 8) | minor; }
 constexpr DWORD D3DPS_VERSION(BYTE major, BYTE minor) { return 0xFFFF0000u | (DWORD(major) << 8) | minor; }
+
+}  // namespace d8web

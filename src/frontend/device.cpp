@@ -752,6 +752,7 @@ public:
 };
 
 }  // namespace
-}  // namespace d8web
 
-IDirect3D8* Direct3DCreate8(UINT) { return new d8web::Direct3D8(); }
+IDirect3D8* CreateDirect3D8() { return new Direct3D8(); }
+
+}  // namespace d8web
