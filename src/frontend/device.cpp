@@ -33,7 +33,11 @@ bool formatInfo(D3DFORMAT f, FormatInfo& out) {
         case D3DFMT_L8: out = {TexFormat::L8, 1, false}; return true;
         case D3DFMT_A8L8: out = {TexFormat::A8L8, 2, false}; return true;
         case D3DFMT_DXT1: out = {TexFormat::DXT1, 0, false}; return true;
+        // DXT2/DXT4 are DXT3/DXT5 with premultiplied alpha — the block layout is
+        // identical, only the alpha interpretation differs. Close enough for W3D.
+        case D3DFMT_DXT2:
         case D3DFMT_DXT3: out = {TexFormat::DXT3, 0, false}; return true;
+        case D3DFMT_DXT4:
         case D3DFMT_DXT5: out = {TexFormat::DXT5, 0, false}; return true;
         default: return false;
     }
