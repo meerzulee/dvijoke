@@ -30,6 +30,7 @@ struct Program {
     GLint globalAmbient = -1, fogColor = -1, fogRange = -1;
     GLint alphaRef = -1, textureFactor = -1, viewportSize = -1;
     GLint tex[kActiveStages] = {-1, -1};
+    GLint texMat[kActiveStages] = {-1, -1};
     struct { GLint dir = -1, diffuse = -1, ambient = -1; } dirLights[4];
     struct { GLint pos = -1, diffuse = -1, atten = -1, range = -1; } pointLights[4];
 };
@@ -46,6 +47,11 @@ struct TextureSlot {
     GLuint gl = 0;
     UINT width = 0, height = 0, levels = 1;
     TexFormat format = TexFormat::RGBA8;
+    // Mip levels the app actually uploaded (bitmask). The engine often uploads
+    // fewer levels than allocated; sampling past them reads zeros (black), so
+    // GL_TEXTURE_MAX_LEVEL is clamped to the contiguous-from-0 uploaded range.
+    uint32_t uploadedMask = 0;
+    int appliedMaxLevel = -1;
     // Last-applied sampler params, to skip redundant glTexParameteri
     DWORD addrU = 0, addrV = 0, magF = 0, minF = 0, mipF = 0;
     bool live = false;
@@ -208,6 +214,7 @@ public:
     void updateTexture(BackendHandle h, UINT level, UINT width, UINT height,
                        TexFormat format, const void* data, UINT byteSize) override {
         TextureSlot& t = m_textures[h - 1];
+        if (level < 32) t.uploadedMask |= (1u << level);
         if (++m_texUploads <= 8)
             std::fprintf(stderr, "[d8web] texUpload #%llu h=%u lvl=%u %ux%u fmt=%d bytes=%u first=%02X%02X%02X%02X\n",
                          (unsigned long long)m_texUploads, h, level, width, height, int(format),
@@ -418,6 +425,8 @@ private:
             for (int i = 0; i < kActiveStages; ++i) {
                 std::snprintf(buf, sizeof(buf), "uTex%d", i);
                 p.tex[i] = loc(buf);
+                std::snprintf(buf, sizeof(buf), "uTexMat%d", i);
+                p.texMat[i] = loc(buf);
             }
             for (int i = 0; i < 4; ++i) {
                 std::snprintf(buf, sizeof(buf), "uDirLights[%d].dir", i); p.dirLights[i].dir = loc(buf);
@@ -482,6 +491,8 @@ private:
             if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, &m._11);
         };
         mat(p.world, s.world); mat(p.view, s.view); mat(p.projection, s.projection);
+        for (int i = 0; i < kActiveStages; ++i)
+            if (key.stages[i].texXform) mat(p.texMat[i], s.texMatrices[i]);
 
         auto col = [](GLint loc, const D3DCOLORVALUE& c) {
             if (loc >= 0) glUniform4f(loc, c.r, c.g, c.b, c.a);
@@ -581,6 +592,15 @@ private:
                          : GL_LINEAR;
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f);
             t.minF = min; t.mipF = mip;
+        }
+
+        // Clamp mip sampling to the levels the app actually uploaded — the rest
+        // of the chain is zero-filled (black) and must never be sampled.
+        int maxLevel = 0;
+        while (maxLevel + 1 < int(t.levels) && (t.uploadedMask >> (maxLevel + 1)) & 1u) ++maxLevel;
+        if (maxLevel != t.appliedMaxLevel) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevel);
+            t.appliedMaxLevel = maxLevel;
         }
     }
 

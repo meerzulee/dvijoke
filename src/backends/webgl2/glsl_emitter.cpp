@@ -20,6 +20,8 @@ uniform vec2 uFogRange;      // x = start, y = end (view-space distance)
 uniform float uAlphaRef;
 uniform vec4 uTextureFactor;
 uniform vec2 uViewportSize;  // for XYZRHW screen->NDC
+uniform mat4 uTexMat0;       // per-stage texture-coordinate transforms
+uniform mat4 uTexMat1;
 struct DirLight { vec3 dir; vec4 diffuse; vec4 ambient; };
 uniform DirLight uDirLights[4];
 struct PointLight { vec3 pos; vec4 diffuse; vec3 atten; float range; };
@@ -34,9 +36,7 @@ std::string texArg(uint8_t arg, int stage, const ShaderKey& key) {
         case D3DTA_TEXTURE: {
             if (!key.stages[stage].bound) return "vec4(1.0)";
             std::ostringstream s;
-            int coord = key.stages[stage].texCoordIndex;
-            if (coord >= key.texCoordSets) coord = 0;
-            s << "texture(uTex" << stage << ", vTex" << coord << ")";
+            s << "texture(uTex" << stage << ", vTexS" << stage << ")";
             return s.str();
         }
         case D3DTA_TFACTOR: return "uTextureFactor";
@@ -102,8 +102,12 @@ ShaderSource emitGLSL(const ShaderKey& key) {
     for (int i = 0; i < key.texCoordSets; ++i)
         vs << "layout(location=" << (3 + i) << ") in vec2 aTex" << i << ";\n";
 
+    int liveStages = 0;
+    while (liveStages < kActiveStages && key.stages[liveStages].colorOp != D3DTOP_DISABLE)
+        ++liveStages;
+
     vs << "out vec4 vColor;\n";
-    for (int i = 0; i < key.texCoordSets; ++i) vs << "out vec2 vTex" << i << ";\n";
+    for (int i = 0; i < liveStages; ++i) vs << "out vec2 vTexS" << i << ";\n";
     if (key.fogLinear) vs << "out float vFogDist;\n";
 
     vs << "void main() {\n";
@@ -155,13 +159,62 @@ ShaderSource emitGLSL(const ShaderKey& key) {
         vs << "  vColor = " << (key.hasDiffuse ? "aColor.bgra" : "vec4(1.0)") << ";\n";
     }
 
-    for (int i = 0; i < key.texCoordSets; ++i) vs << "  vTex" << i << " = aTex" << i << ";\n";
+    // Per-stage texture coordinates: vertex UVs, or generated (texgen), then
+    // optionally run through the stage's texture matrix (D3D convention: input
+    // padded with a trailing 1, row-vector times matrix — our column-major
+    // upload of the row-major D3D matrix makes uTexMat * v equivalent).
+    for (int i = 0; i < liveStages; ++i) {
+        const StageKey& st = key.stages[i];
+        std::string mat = (i == 0) ? "uTexMat0" : "uTexMat1";
+        auto uvExpr = [&]() -> std::string {
+            int coord = st.texCoordIndex;
+            if (coord >= key.texCoordSets) coord = 0;
+            if (key.texCoordSets == 0) return "vec2(0.0)";
+            return "aTex" + std::to_string(coord);
+        };
+        vs << "  {\n";
+        if (st.texGen == 0) {
+            if (st.texXform) {
+                vs << "    vec4 tc = " << mat << " * vec4(" << uvExpr() << ", 1.0, 0.0);\n";
+                if (st.texProjected && st.texXform >= 3)
+                    vs << "    vTexS" << i << " = tc.xy / (abs(tc.z) < 1e-6 ? 1e-6 : tc.z);\n";
+                else
+                    vs << "    vTexS" << i << " = tc.xy;\n";
+            } else {
+                vs << "    vTexS" << i << " = " << uvExpr() << ";\n";
+            }
+        } else {
+            // Camera-space texgen sources
+            std::string n = key.hasNormal
+                ? "normalize(mat3(uView) * (mat3(uWorld) * aNormal))"
+                : "vec3(0.0, 0.0, 1.0)";
+            vs << "    vec3 src;\n";
+            switch (st.texGen) {
+                case 1:  // D3DTSS_TCI_CAMERASPACENORMAL >> 16
+                    vs << "    src = " << n << ";\n"; break;
+                case 2:  // CAMERASPACEPOSITION
+                    vs << "    src = viewPos.xyz;\n"; break;
+                default: // CAMERASPACEREFLECTIONVECTOR
+                    vs << "    src = reflect(normalize(viewPos.xyz), " << n << ");\n"; break;
+            }
+            if (st.texXform) {
+                vs << "    vec4 tc = " << mat << " * vec4(src, 1.0);\n";
+                if (st.texProjected && st.texXform >= 3)
+                    vs << "    vTexS" << i << " = tc.xy / (abs(tc.z) < 1e-6 ? 1e-6 : tc.z);\n";
+                else
+                    vs << "    vTexS" << i << " = tc.xy;\n";
+            } else {
+                vs << "    vTexS" << i << " = src.xy;\n";
+            }
+        }
+        vs << "  }\n";
+    }
     vs << "}\n";
 
     // ---------------- Fragment shader ----------------
     fs << "#version 300 es\nprecision mediump float;\n" << kUniformBlock;
     fs << "in vec4 vColor;\n";
-    for (int i = 0; i < key.texCoordSets; ++i) fs << "in vec2 vTex" << i << ";\n";
+    for (int i = 0; i < liveStages; ++i) fs << "in vec2 vTexS" << i << ";\n";
     if (key.fogLinear) fs << "in float vFogDist;\n";
     for (int i = 0; i < kActiveStages; ++i)
         if (key.stages[i].bound) fs << "uniform sampler2D uTex" << i << ";\n";

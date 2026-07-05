@@ -19,6 +19,9 @@ struct StageKey {
     uint8_t alphaArg1 = D3DTA_TEXTURE;
     uint8_t alphaArg2 = D3DTA_CURRENT;
     uint8_t texCoordIndex = 0;
+    uint8_t texGen = 0;                  // D3DTSS_TCI_* >> 16 (0 = passthru)
+    uint8_t texXform = 0;                // D3DTTFF count (0 = disabled)
+    bool texProjected = false;           // D3DTTFF_PROJECTED
     bool bound = false;                  // texture bound on this stage
 
     bool operator==(const StageKey&) const = default;
@@ -82,6 +85,14 @@ struct ShaderKey {
             sk.alphaArg1 = uint8_t(st.values[D3DTSS_ALPHAARG1] & 0xFF);
             sk.alphaArg2 = uint8_t(st.values[D3DTSS_ALPHAARG2] & 0xFF);
             sk.texCoordIndex = uint8_t(st.values[D3DTSS_TEXCOORDINDEX] & 0xFF);
+            // Texgen + texture-coordinate transform. The pre-transformed UI path
+            // never uses either — zero them there so UI keys stay stable.
+            if (!layout.xyzrhw) {
+                sk.texGen = uint8_t((st.values[D3DTSS_TEXCOORDINDEX] >> 16) & 0xF);
+                DWORD ttff = st.values[D3DTSS_TEXTURETRANSFORMFLAGS];
+                sk.texXform = uint8_t(ttff & 0xFF);
+                sk.texProjected = (ttff & D3DTTFF_PROJECTED) != 0;
+            }
             sk.bound = s.textures[i] != 0;
             // No texture bound but ops reference D3DTA_TEXTURE: D3D8 degrades the
             // stage to a passthrough of the current color, not "texture = white".

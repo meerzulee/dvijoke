@@ -30,8 +30,10 @@ bool formatInfo(D3DFORMAT f, FormatInfo& out) {
         case D3DFMT_R5G6B5: out = {TexFormat::RGB565, 2, false}; return true;
         case D3DFMT_A1R5G5B5: out = {TexFormat::RGB5A1, 2, true}; return true;
         case D3DFMT_A4R4G4B4: out = {TexFormat::RGBA4, 2, true}; return true;
-        case D3DFMT_L8: out = {TexFormat::L8, 1, false}; return true;
-        case D3DFMT_A8L8: out = {TexFormat::A8L8, 2, false}; return true;
+        // WebGL2 has no texture swizzle: GL_R8/GL_RG8 sample as (r,0,0,1)/(r,g,0,1),
+        // but D3D L8/A8L8 replicate luminance to RGB. CPU-expand to RGBA8 instead.
+        case D3DFMT_L8: out = {TexFormat::RGBA8, 1, true}; return true;
+        case D3DFMT_A8L8: out = {TexFormat::RGBA8, 2, true}; return true;
         case D3DFMT_DXT1: out = {TexFormat::DXT1, 0, false}; return true;
         // DXT2/DXT4 are DXT3/DXT5 with premultiplied alpha — the block layout is
         // identical, only the alpha interpretation differs. Close enough for W3D.
@@ -313,7 +315,20 @@ public:
         if (!formatInfo(m_format, fi)) return;
         UINT w = std::max(1u, m_width >> level), h = std::max(1u, m_height >> level);
         std::vector<BYTE>& src = m_shadow[level];
-        if (fi.needsSwizzle) {
+        if (m_format == D3DFMT_L8 || m_format == D3DFMT_A8L8) {
+            // Luminance formats: expand to RGBA8 (see formatInfo).
+            const UINT n = w * h;
+            m_scratch.resize(size_t(n) * 4);
+            const bool hasA = (m_format == D3DFMT_A8L8);
+            for (UINT i = 0; i < n; ++i) {
+                BYTE l = src[i * fi.bytesPerPixel];
+                BYTE a = hasA ? src[i * 2 + 1] : 0xFF;
+                BYTE* p = m_scratch.data() + size_t(i) * 4;
+                p[0] = l; p[1] = l; p[2] = l; p[3] = a;
+            }
+            m_backend->updateTexture(m_handle, level, w, h, m_backendFormat,
+                                     m_scratch.data(), UINT(m_scratch.size()));
+        } else if (fi.needsSwizzle) {
             // Convert a scratch copy; shadow keeps D3D layout so re-locks see what the
             // engine wrote.
             m_scratch.assign(src.begin(), src.end());
@@ -512,7 +527,8 @@ public:
         if (t == D3DTS_WORLD) m_state.world = *m;
         else if (t == D3DTS_VIEW) m_state.view = *m;
         else if (t == D3DTS_PROJECTION) m_state.projection = *m;
-        // texture transforms: accepted, applied when TEXTURETRANSFORMFLAGS lands
+        else if (t >= D3DTS_TEXTURE0 && t <= D3DTS_TEXTURE7)
+            m_state.texMatrices[t - D3DTS_TEXTURE0] = *m;
         return D3D_OK;
     }
     HRESULT GetTransform(D3DTRANSFORMSTATETYPE t, D3DMATRIX* m) override {
@@ -520,6 +536,8 @@ public:
         if (t == D3DTS_WORLD) *m = m_state.world;
         else if (t == D3DTS_VIEW) *m = m_state.view;
         else if (t == D3DTS_PROJECTION) *m = m_state.projection;
+        else if (t >= D3DTS_TEXTURE0 && t <= D3DTS_TEXTURE7)
+            *m = m_state.texMatrices[t - D3DTS_TEXTURE0];
         return D3D_OK;
     }
     HRESULT SetViewport(const D3DVIEWPORT8* vp) override {

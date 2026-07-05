@@ -53,6 +53,7 @@ struct StateSnapshot {
     std::array<bool, kMaxTextureStages> textureHasAlpha{};
 
     D3DMATRIX world{}, view{}, projection{};
+    std::array<D3DMATRIX, kMaxTextureStages> texMatrices{};   // D3DTS_TEXTURE0..7
     D3DVIEWPORT8 viewport{};
     D3DMATERIAL8 material{};
     std::array<LightState, kMaxLights> lights{};
@@ -65,6 +66,7 @@ struct StateSnapshot {
             m._11 = m._22 = m._33 = m._44 = 1.0f;
         };
         identity(world); identity(view); identity(projection);
+        for (auto& m : texMatrices) identity(m);
 
         // Stages >= 1 default to DISABLE (StageState's ctor holds stage-0 defaults)
         for (int i = 1; i < kMaxTextureStages; ++i) {
