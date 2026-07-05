@@ -106,9 +106,10 @@ bool createScene() {
         }
         WORD b = WORD(f * 4);
         WORD* idx = indices + f * 6;
-        // Left-handed clockwise winding, as D3D8 expects with D3DCULL_CCW
-        idx[0] = b; idx[1] = WORD(b + 1); idx[2] = WORD(b + 2);
-        idx[3] = b; idx[4] = WORD(b + 2); idx[5] = WORD(b + 3);
+        // Clockwise-when-facing-camera winding — D3D8 front faces with D3DCULL_CCW.
+        // (Quads above are listed CCW, so emit each triangle reversed.)
+        idx[0] = b; idx[1] = WORD(b + 2); idx[2] = WORD(b + 1);
+        idx[3] = b; idx[4] = WORD(b + 3); idx[5] = WORD(b + 2);
     }
 
     if (FAILED(g_device->CreateVertexBuffer(sizeof(verts), 0, kCubeFVF, D3DPOOL_MANAGED, &g_vb)))

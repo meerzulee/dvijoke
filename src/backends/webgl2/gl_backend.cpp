@@ -307,7 +307,7 @@ public:
         if (!prog.prog) return;
         glUseProgram(prog.prog);
 
-        applyFixedState(s);
+        applyFixedState(s, key);
         uploadUniforms(prog, s, key);
         bindTextures(prog, s, key);
         bindGeometry(geo);
@@ -316,9 +316,9 @@ public:
         if (vertexCount == 0) return;
 
         if (++m_drawCount <= 5 || m_drawCount % 500 == 0)
-            std::fprintf(stderr, "[d8web] draw #%llu prim=%d verts=%u tex0=%u prog=%u\n",
+            std::fprintf(stderr, "[d8web] draw #%llu prim=%d verts=%u tex0=%u prog=%u cull=%u rhw=%d\n",
                          (unsigned long long)m_drawCount, int(geo.primitive), vertexCount,
-                         s.textures[0], prog.prog);
+                         s.textures[0], prog.prog, s.rs[D3DRS_CULLMODE], int(key.preTransformed));
 
         if (geo.ib) {
             GLenum type = geo.index32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
@@ -432,7 +432,7 @@ private:
         return m_programs.emplace(key, p).first->second;
     }
 
-    void applyFixedState(const StateSnapshot& s) {
+    void applyFixedState(const StateSnapshot& s, const ShaderKey& key) {
         // Depth
         if (s.rs[D3DRS_ZENABLE]) { glEnable(GL_DEPTH_TEST); glDepthFunc(glCmp(s.rs[D3DRS_ZFUNC])); }
         else glDisable(GL_DEPTH_TEST);
@@ -442,12 +442,17 @@ private:
         // triangle in D3D terms is CW in GL terms. So D3DCULL_CCW (cull D3D-CCW)
         // keeps GL-CCW faces: glFrontFace(GL_CCW). Verified empirically (inverted
         // mapping renders the cube inside-out).
+        // Empirically settled against real engine geometry (ZH main menu):
+        // D3DCULL_CW must keep GL-CCW faces. The XYZRHW path y-flips in the
+        // shader, mirroring winding, so it takes the opposite front face.
+        GLenum cwCullFront  = key.preTransformed ? GL_CW : GL_CCW;  // when D3D culls CW
+        GLenum ccwCullFront = key.preTransformed ? GL_CCW : GL_CW;  // when D3D culls CCW
         switch (s.rs[D3DRS_CULLMODE]) {
             case D3DCULL_NONE: glDisable(GL_CULL_FACE); break;
             case D3DCULL_CW:
-                glEnable(GL_CULL_FACE); glCullFace(GL_BACK); glFrontFace(GL_CW); break;
+                glEnable(GL_CULL_FACE); glCullFace(GL_BACK); glFrontFace(cwCullFront); break;
             default:  // D3DCULL_CCW
-                glEnable(GL_CULL_FACE); glCullFace(GL_BACK); glFrontFace(GL_CCW); break;
+                glEnable(GL_CULL_FACE); glCullFace(GL_BACK); glFrontFace(ccwCullFront); break;
         }
 
         // Blend
