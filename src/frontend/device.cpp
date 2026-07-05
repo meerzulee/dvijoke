@@ -216,6 +216,8 @@ public:
     UINT height() const { return m_height; }
     D3DFORMAT format() const { return m_format; }
     BYTE* pixels() { return m_shadow.data(); }
+    Texture8* owner() const { return m_owner; }
+    UINT level() const { return m_level; }
 
 private:
     Texture8* m_owner = nullptr;
@@ -452,9 +454,40 @@ public:
         }
         return D3D_OK;
     }
-    HRESULT CopyRects(IDirect3DSurface8*, const RECT*, UINT, IDirect3DSurface8*, const POINT*) override {
-        static bool warned = false;
-        if (!warned) { std::fprintf(stderr, "[d8web] CopyRects stub\n"); warned = true; }
+    HRESULT CopyRects(IDirect3DSurface8* srcSurf, const RECT* rects, UINT count,
+                      IDirect3DSurface8* dstSurf, const POINT* points) override {
+        // CPU blit between surface shadows; same-format, no stretch (D3D8 contract).
+        // Used by the engine to compose glyph surfaces into sentence textures.
+        auto* src = static_cast<Surface8*>(srcSurf);
+        auto* dst = static_cast<Surface8*>(dstSurf);
+        if (!src || !dst || src->format() != dst->format()) return D3DERR_INVALIDCALL;
+        FormatInfo fi{};
+        if (!formatInfo(src->format(), fi) || fi.bytesPerPixel == 0)
+            return D3DERR_INVALIDCALL;  // block-compressed copies unsupported
+        const UINT bpp = fi.bytesPerPixel;
+        BYTE* sp = src->owner() ? src->owner()->levelPixels(src->level()) : src->pixels();
+        BYTE* dp = dst->owner() ? dst->owner()->levelPixels(dst->level()) : dst->pixels();
+        const UINT spitch = src->width() * bpp, dpitch = dst->width() * bpp;
+        auto blit = [&](LONG sx, LONG sy, LONG w, LONG h, LONG dx, LONG dy) {
+            if (sx < 0 || sy < 0 || dx < 0 || dy < 0) return;
+            w = std::min({w, LONG(src->width()) - sx, LONG(dst->width()) - dx});
+            h = std::min({h, LONG(src->height()) - sy, LONG(dst->height()) - dy});
+            for (LONG row = 0; row < h; ++row)
+                std::memcpy(dp + size_t(dy + row) * dpitch + size_t(dx) * bpp,
+                            sp + size_t(sy + row) * spitch + size_t(sx) * bpp,
+                            size_t(w) * bpp);
+        };
+        if (!rects || count == 0) {
+            blit(0, 0, LONG(src->width()), LONG(src->height()), 0, 0);
+        } else {
+            for (UINT i = 0; i < count; ++i) {
+                LONG dx = points ? points[i].x : rects[i].left;
+                LONG dy = points ? points[i].y : rects[i].top;
+                blit(rects[i].left, rects[i].top, rects[i].right - rects[i].left,
+                     rects[i].bottom - rects[i].top, dx, dy);
+            }
+        }
+        if (dst->owner()) dst->owner()->uploadLevel(dst->level());
         return D3D_OK;
     }
     HRESULT SetRenderTarget(IDirect3DSurface8*, IDirect3DSurface8*) override {
