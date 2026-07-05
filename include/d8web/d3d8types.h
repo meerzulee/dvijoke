@@ -6,6 +6,67 @@
 #include <cstdint>
 #include <cstring>
 
+
+// Coexistence with a real d3d8.h in the same TU (the engine bridge): the real
+// header #defines many of the names declared below as macros, which would
+// mangle these declarations. Clear them; the bridge re-imports what it needs
+// via using-declarations from namespace d8web.
+#ifdef DIRECT3D_VERSION
+#undef D3D_OK
+#undef D3D_SDK_VERSION
+#undef D3DADAPTER_DEFAULT
+#undef D3DCLEAR_STENCIL
+#undef D3DCLEAR_TARGET
+#undef D3DCLEAR_ZBUFFER
+#undef D3DCOLOR_ARGB
+#undef D3DCOLOR_XRGB
+#undef D3DCOLORWRITEENABLE_ALPHA
+#undef D3DCOLORWRITEENABLE_BLUE
+#undef D3DCOLORWRITEENABLE_GREEN
+#undef D3DCOLORWRITEENABLE_RED
+#undef D3DCREATE_FPU_PRESERVE
+#undef D3DCREATE_HARDWARE_VERTEXPROCESSING
+#undef D3DCREATE_MIXED_VERTEXPROCESSING
+#undef D3DCREATE_SOFTWARE_VERTEXPROCESSING
+#undef D3DERR_DEVICELOST
+#undef D3DERR_DEVICENOTRESET
+#undef D3DERR_INVALIDCALL
+#undef D3DERR_NOTAVAILABLE
+#undef D3DERR_OUTOFVIDEOMEMORY
+#undef D3DFVF_DIFFUSE
+#undef D3DFVF_NORMAL
+#undef D3DFVF_POSITION_MASK
+#undef D3DFVF_SPECULAR
+#undef D3DFVF_TEX0
+#undef D3DFVF_TEX1
+#undef D3DFVF_TEX2
+#undef D3DFVF_TEXCOUNT_MASK
+#undef D3DFVF_TEXCOUNT_SHIFT
+#undef D3DFVF_XYZ
+#undef D3DFVF_XYZRHW
+#undef D3DLOCK_DISCARD
+#undef D3DLOCK_NOOVERWRITE
+#undef D3DLOCK_NOSYSLOCK
+#undef D3DLOCK_READONLY
+#undef D3DPS_VERSION
+#undef D3DPTEXTURECAPS_POW2
+#undef D3DPTEXTURECAPS_SQUAREONLY
+#undef D3DTA_ALPHAREPLICATE
+#undef D3DTA_COMPLEMENT
+#undef D3DTA_CURRENT
+#undef D3DTA_DIFFUSE
+#undef D3DTA_SELECTMASK
+#undef D3DTA_TEXTURE
+#undef D3DTA_TFACTOR
+#undef D3DUSAGE_DEPTHSTENCIL
+#undef D3DUSAGE_DYNAMIC
+#undef D3DUSAGE_RENDERTARGET
+#undef D3DUSAGE_SOFTWAREPROCESSING
+#undef D3DUSAGE_WRITEONLY
+#undef D3DVS_VERSION
+#undef D3DTS_WORLD
+#endif
+
 // Everything lives in namespace d8web so these definitions can coexist with a
 // real d3d8.h (DXVK/mingw) in the same translation unit — the engine bridge
 // includes both.

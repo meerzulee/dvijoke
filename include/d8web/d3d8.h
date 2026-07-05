@@ -92,12 +92,18 @@ struct IDirect3DDevice8 : IUnknown8 {
     virtual HRESULT SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) = 0;
     virtual HRESULT GetTransform(D3DTRANSFORMSTATETYPE state, D3DMATRIX* matrix) = 0;
     virtual HRESULT SetViewport(const D3DVIEWPORT8* viewport) = 0;
+    virtual HRESULT GetViewport(D3DVIEWPORT8* viewport) = 0;
     virtual HRESULT SetMaterial(const D3DMATERIAL8* material) = 0;
+    virtual HRESULT GetMaterial(D3DMATERIAL8* material) = 0;
     virtual HRESULT SetLight(DWORD index, const D3DLIGHT8* light) = 0;
     virtual HRESULT LightEnable(DWORD index, BOOL enable) = 0;
+    virtual HRESULT GetLight(DWORD index, D3DLIGHT8* light) = 0;
+    virtual HRESULT GetLightEnable(DWORD index, BOOL* enable) = 0;
     virtual HRESULT SetClipPlane(DWORD index, const float* plane) = 0;
     virtual HRESULT SetRenderState(D3DRENDERSTATETYPE state, DWORD value) = 0;
+    virtual HRESULT GetRenderState(D3DRENDERSTATETYPE state, DWORD* value) = 0;
     virtual HRESULT SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) = 0;
+    virtual HRESULT GetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD* value) = 0;
     virtual HRESULT SetTexture(DWORD stage, IDirect3DBaseTexture8* texture) = 0;
     virtual HRESULT ValidateDevice(DWORD* passes) = 0;
 

@@ -119,12 +119,18 @@ public:
         attrs.depth = true;
         attrs.stencil = true;
         attrs.antialias = false;
+        // Keep the rendered frame readable between RAF ticks (screenshots, and
+        // some browsers otherwise clear on composite).
+        attrs.preserveDrawingBuffer = true;
         m_ctx = emscripten_webgl_create_context("#canvas", &attrs);
         if (m_ctx <= 0) {
             std::fprintf(stderr, "[d8web] WebGL2 context creation failed (%ld)\n", (long)m_ctx);
             return false;
         }
         emscripten_webgl_make_context_current(m_ctx);
+        // DXT texture support is an extension WebGL only activates on request
+        bool s3tc = emscripten_webgl_enable_extension(m_ctx, "WEBGL_compressed_texture_s3tc");
+        std::fprintf(stderr, "[d8web] S3TC/DXT extension: %s\n", s3tc ? "enabled" : "UNAVAILABLE");
 #endif
         m_width = width;
         m_height = height;
@@ -202,6 +208,11 @@ public:
     void updateTexture(BackendHandle h, UINT level, UINT width, UINT height,
                        TexFormat format, const void* data, UINT byteSize) override {
         TextureSlot& t = m_textures[h - 1];
+        if (++m_texUploads <= 8)
+            std::fprintf(stderr, "[d8web] texUpload #%llu h=%u lvl=%u %ux%u fmt=%d bytes=%u first=%02X%02X%02X%02X\n",
+                         (unsigned long long)m_texUploads, h, level, width, height, int(format),
+                         byteSize, ((const BYTE*)data)[0], ((const BYTE*)data)[1],
+                         ((const BYTE*)data)[2], ((const BYTE*)data)[3]);
         glBindTexture(GL_TEXTURE_2D, t.gl);
         switch (format) {
             case TexFormat::RGBA8:
@@ -262,8 +273,12 @@ public:
         GLbitfield mask = 0;
         if (color) {
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+#ifdef D8WEB_DEBUG_CLEAR
+            glClearColor(1.0f, 0.0f, 1.0f, 1.0f);  // magenta context-ownership probe
+#else
             glClearColor(((argb >> 16) & 0xFF) / 255.0f, ((argb >> 8) & 0xFF) / 255.0f,
                          (argb & 0xFF) / 255.0f, ((argb >> 24) & 0xFF) / 255.0f);
+#endif
             mask |= GL_COLOR_BUFFER_BIT;
         }
         if (depth) {
@@ -275,6 +290,9 @@ public:
             glClearStencil(GLint(stencilValue));
             mask |= GL_STENCIL_BUFFER_BIT;
         }
+        if (++m_clearCount <= 3 || m_clearCount % 300 == 0)
+            std::fprintf(stderr, "[d8web] clear #%llu argb=0x%08X vp=%ux%u\n",
+                         (unsigned long long)m_clearCount, argb, m_viewport.Width, m_viewport.Height);
         // Clear respects scissor, not viewport, in GL; D3D Clear clears the viewport.
         glEnable(GL_SCISSOR_TEST);
         glScissor(GLint(m_viewport.X), GLint(m_height) - GLint(m_viewport.Y + m_viewport.Height),
@@ -296,6 +314,11 @@ public:
 
         const UINT vertexCount = geo.primCount == 0 ? 0 : vertexCountFor(geo.primitive, geo.primCount);
         if (vertexCount == 0) return;
+
+        if (++m_drawCount <= 5 || m_drawCount % 500 == 0)
+            std::fprintf(stderr, "[d8web] draw #%llu prim=%d verts=%u tex0=%u prog=%u\n",
+                         (unsigned long long)m_drawCount, int(geo.primitive), vertexCount,
+                         s.textures[0], prog.prog);
 
         if (geo.ib) {
             GLenum type = geo.index32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
@@ -606,6 +629,9 @@ private:
     GLuint m_boundIB = 0;
     bool m_attrOn[8] = {};
     uint64_t m_frame = 0;
+    uint64_t m_drawCount = 0;
+    uint64_t m_clearCount = 0;
+    uint64_t m_texUploads = 0;
     D3DVIEWPORT8 m_viewport{};
     std::vector<BufferSlot> m_buffers;
     std::vector<TextureSlot> m_textures;

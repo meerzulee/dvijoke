@@ -491,9 +491,19 @@ public:
         m_backend->setViewport(*vp);
         return D3D_OK;
     }
+    HRESULT GetViewport(D3DVIEWPORT8* vp) override {
+        if (!vp) return D3DERR_INVALIDCALL;
+        *vp = m_state.viewport;
+        return D3D_OK;
+    }
     HRESULT SetMaterial(const D3DMATERIAL8* m) override {
         if (!m) return D3DERR_INVALIDCALL;
         m_state.material = *m;
+        return D3D_OK;
+    }
+    HRESULT GetMaterial(D3DMATERIAL8* m) override {
+        if (!m) return D3DERR_INVALIDCALL;
+        *m = m_state.material;
         return D3D_OK;
     }
     HRESULT SetLight(DWORD i, const D3DLIGHT8* l) override {
@@ -507,15 +517,36 @@ public:
         m_state.lights[i].enabled = enable != 0;
         return D3D_OK;
     }
+    HRESULT GetLight(DWORD i, D3DLIGHT8* l) override {
+        if (!l || i >= kMaxLights) return D3DERR_INVALIDCALL;
+        *l = m_state.lights[i].light;
+        return D3D_OK;
+    }
+    HRESULT GetLightEnable(DWORD i, BOOL* enable) override {
+        if (!enable || i >= kMaxLights) return D3DERR_INVALIDCALL;
+        *enable = m_state.lights[i].enabled ? TRUE : FALSE;
+        return D3D_OK;
+    }
     HRESULT SetClipPlane(DWORD, const float*) override { return D3D_OK; }  // P2 (water)
 
     HRESULT SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override {
         if (DWORD(state) < D3DRS_MAX_SENTINEL) m_state.rs[state] = value;
         return D3D_OK;  // unknown states accepted silently — never crash the engine
     }
+    HRESULT GetRenderState(D3DRENDERSTATETYPE state, DWORD* value) override {
+        if (!value) return D3DERR_INVALIDCALL;
+        *value = DWORD(state) < D3DRS_MAX_SENTINEL ? m_state.rs[state] : 0;
+        return D3D_OK;
+    }
     HRESULT SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override {
         if (stage < kMaxTextureStages && DWORD(type) < D3DTSS_MAX_SENTINEL)
             m_state.stages[stage].values[type] = value;
+        return D3D_OK;
+    }
+    HRESULT GetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD* value) override {
+        if (!value) return D3DERR_INVALIDCALL;
+        *value = (stage < kMaxTextureStages && DWORD(type) < D3DTSS_MAX_SENTINEL)
+                     ? m_state.stages[stage].values[type] : 0;
         return D3D_OK;
     }
     HRESULT SetTexture(DWORD stage, IDirect3DBaseTexture8* texture) override {
