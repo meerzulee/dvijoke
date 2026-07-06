@@ -1,62 +1,60 @@
 # Dvijoke
 
-**движок** — the engine. Runs 2000s Direct3D 8 games in the browser as native
-WebAssembly ports.
+**движок** — the engine. A collection of classic graphics-API ports that run
+2000s PC games in the browser as native WebAssembly builds.
 
-Dvijoke is the engine runtime behind [Igroteka](https://github.com/meerzulee/igroteka),
+Dvijoke is the engine technology behind [Igroteka](https://github.com/meerzulee/igroteka),
 the 2000s-gaming-café-in-your-browser platform. It currently runs
-**C&C Generals: Zero Hour** — main menu, animated shell map, and skirmish —
-entirely in a browser tab at 30 fps.
+**C&C Generals: Zero Hour** — menu, animated shell map, and skirmish — in a
+browser tab at 30 fps.
 
 The name reads two ways on purpose: Slavic readers see движок (Russian gamedev
 slang for "game engine"); everyone else gets the joke.
 
-## What's in this repo: d8web
+## Architecture
 
-This repository holds **d8web** (MIT), the heart of Dvijoke — a Direct3D 8 →
-WebGL2 translation layer built for fixed-function-era games:
+Dvijoke is a family of API **frontends** over shared **backends**:
 
 ```
-Game engine (D3D8 calls)
-   └─ d8web frontend: IDirect3D8/Device8 interfaces + state tracker
-        └─ ShaderKey: FFP state bits → generated GLSL uber-shaders
-             └─ IBackend seam
-                  └─ WebGL2 backend (today) │ WebGPU backend (planned)
+Frontends (one per legacy API)        Backends (one per modern API)
+┌─────────────────────────────┐
+│ d8web   Direct3D 8   (live) │      ┌──────────────────────────┐
+│ d9web   Direct3D 9  (plan)  │ ──►  │ webgl2   (live)          │
+│ ...                         │      │ webgpu   (planned)       │
+└─────────────────────────────┘      │ native   (maybe: Dawn)   │
+      state tracker + ShaderKey      └──────────────────────────┘
+      + shader generators                 dumb translators
 ```
 
-Backends stay dumb: all intelligence (state tracking, shader description,
-program caching) lives above the `IBackend` seam. A backend only translates
-state snapshots into API calls. The WebGPU backend is a WGSL emitter + a new
-translator — nothing else moves.
+The rule: **backends stay dumb**. All intelligence — state tracking, shader
+description (ShaderKey), program caching — lives in the frontend layer above
+the `IBackend` seam. A backend only translates state snapshots into API calls.
+Adding WebGPU means writing a WGSL emitter and a translator; nothing else
+moves. Adding d9web means a new frontend that reuses the same backends.
 
-Battle-tested D3D8 surface (driven by a real 200k-LoC engine, not demos):
-fixed-function pipeline with per-stage combine ops (incl. MULTIPLYADD/DOTPRODUCT3),
-texture-coordinate transforms + camera-space texgen, directional/point lights,
-fog, alpha test/blend, DXT1–5 (incl. DXT2/4 aliasing), luminance formats,
-partial-rect locks, `CopyRects`, texture-owned level surfaces, mip-chain
-integrity clamps.
+Today the shared core and the WebGL2 backend live inside `d8web/` (it is the
+only frontend). When the second frontend lands, `core/` and `backends/` get
+extracted to the repo root — the seam is already designed for it.
 
-## The full Dvijoke stack
+## Contents
+
+| Directory | Status | Purpose |
+|---|---|---|
+| `d8web/` | live | Direct3D 8 frontend + shared core + WebGL2 backend. Battle-tested by Zero Hour (200k LoC engine, fixed-function era) |
+| `d9web/` | planned | Direct3D 9 frontend (GunZ/BF2-era games) |
+
+Releases: `Dvijoke <version> (<backend>)` — e.g. `Dvijoke 0.4 (WebGL2)`,
+later `Dvijoke 1.x (WebGPU)`. One engine version, N backend builds.
+
+## The full stack for a game port
 
 | Part | License | Where |
 |---|---|---|
-| `d8web` (this repo) | MIT | translation layer + backends |
-| engine fork (`zh-web`) | GPL v3 | fork of [GeneralsGameCode](https://github.com/TheSuperHackers/GeneralsGameCode) with the Emscripten/WASM toolchain, COM bridge and boot loader |
+| Dvijoke (this repo) | MIT | frontends + backends |
+| game engine fork | per-game (e.g. GPL v3) | e.g. a [GeneralsGameCode](https://github.com/TheSuperHackers/GeneralsGameCode) fork with the Emscripten toolchain, COM bridge and boot loader |
 
-The GPL engine fork and MIT d8web never mix: the fork's `wasm/d8web_bridge/`
-adapts DXVK-style D3D8 vtables onto d8web's namespaced interfaces at the
-boundary.
-
-Releases are named `Dvijoke <version> (<backend>)` — e.g. `Dvijoke 0.4 (WebGL2)`,
-later `Dvijoke 1.x (WebGPU)`. One engine version, N backend builds.
-
-## Status
-
-- Zero Hour boots, renders its animated main menu with correct terrain,
-  text, textures and UI, and loads into skirmish
-- See `INTERFACE.md` for the scoped D3D8 contract (derived from grepping the
-  engine's actual call sites)
-- Examples in `examples/`: lit cube, textured quad, UI quads
+GPL engine forks and MIT Dvijoke never mix: the fork's bridge adapts the
+game's D3D vtables onto Dvijoke's namespaced interfaces at the boundary.
 
 ## License
 
