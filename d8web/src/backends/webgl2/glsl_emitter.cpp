@@ -123,7 +123,13 @@ ShaderSource emitGLSL(const ShaderKey& key) {
     } else {
         vs << "  vec4 worldPos = uWorld * vec4(aPosition, 1.0);\n"
               "  vec4 viewPos = uView * worldPos;\n"
-              "  gl_Position = uProjection * viewPos;\n";
+              "  gl_Position = uProjection * viewPos;\n"
+              // D3D8 rasterizes with pixel centers at integer coordinates; GL
+              // uses half-integers. Shift clip space half a pixel so 1:1
+              // texel-to-pixel UI (menu buttons tiled from texture segments)
+              // samples exactly as on D3D — otherwise every segment seam
+              // shows as a vertical line.
+              "  gl_Position.xy += vec2(-1.0, 1.0) / uViewportSize * gl_Position.w;\n";
         // D3D LH view space: camera looks down +Z, visible depth is positive
         if (key.fogLinear) vs << "  vFogDist = viewPos.z;\n";
     }
