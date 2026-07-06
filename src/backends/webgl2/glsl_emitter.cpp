@@ -50,9 +50,13 @@ std::string applyModifiers(std::string expr, uint8_t arg) {
     return expr;
 }
 
-// D3DTEXTUREOP -> GLSL combine expression over arg1/arg2 (vec4 or vec3 slice applied by caller)
-std::string combineOp(uint8_t op, const std::string& a1, const std::string& a2) {
+// D3DTEXTUREOP -> GLSL combine expression over arg0/arg1/arg2 (vec4 or vec3
+// slice applied by caller). arg0 is the third operand of MULTIPLYADD/LERP.
+std::string combineOp(uint8_t op, const std::string& a1, const std::string& a2,
+                      const std::string& a0) {
     switch (op) {
+        case D3DTOP_MULTIPLYADD: return "(" + a0 + " + " + a1 + " * " + a2 + ")";
+        case D3DTOP_LERP: return "mix(" + a2 + ", " + a1 + ", " + a0 + ")";
         case D3DTOP_SELECTARG1: return a1;
         case D3DTOP_SELECTARG2: return a2;
         case D3DTOP_MODULATE: return "(" + a1 + " * " + a2 + ")";
@@ -229,14 +233,16 @@ ShaderSource emitGLSL(const ShaderKey& key) {
         if (st.colorOp == D3DTOP_DISABLE) break;  // D3D8: disable terminates the chain
         std::string c1 = applyModifiers(texArg(st.colorArg1, i, key), st.colorArg1);
         std::string c2 = applyModifiers(texArg(st.colorArg2, i, key), st.colorArg2);
+        std::string c0 = applyModifiers(texArg(st.colorArg0, i, key), st.colorArg0);
         fs << "  {\n    vec4 stageOut;\n"
-           << "    stageOut.rgb = " << combineOp(st.colorOp, c1, c2) << ".rgb;\n";
+           << "    stageOut.rgb = " << combineOp(st.colorOp, c1, c2, c0) << ".rgb;\n";
         if (st.alphaOp == D3DTOP_DISABLE) {
             fs << "    stageOut.a = current.a;\n";
         } else {
             std::string a1 = applyModifiers(texArg(st.alphaArg1, i, key), st.alphaArg1);
             std::string a2 = applyModifiers(texArg(st.alphaArg2, i, key), st.alphaArg2);
-            fs << "    stageOut.a = " << combineOp(st.alphaOp, a1, a2) << ".a;\n";
+            std::string a0 = applyModifiers(texArg(st.alphaArg0, i, key), st.alphaArg0);
+            fs << "    stageOut.a = " << combineOp(st.alphaOp, a1, a2, a0) << ".a;\n";
         }
         fs << "    current = clamp(stageOut, 0.0, 1.0);\n  }\n";
     }

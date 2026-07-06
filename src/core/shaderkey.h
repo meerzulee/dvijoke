@@ -15,9 +15,11 @@ struct StageKey {
     uint8_t colorOp = D3DTOP_DISABLE;   // D3DTEXTUREOP
     uint8_t colorArg1 = D3DTA_TEXTURE;
     uint8_t colorArg2 = D3DTA_CURRENT;
+    uint8_t colorArg0 = D3DTA_CURRENT;  // third arg (MULTIPLYADD/LERP)
     uint8_t alphaOp = D3DTOP_DISABLE;
     uint8_t alphaArg1 = D3DTA_TEXTURE;
     uint8_t alphaArg2 = D3DTA_CURRENT;
+    uint8_t alphaArg0 = D3DTA_CURRENT;
     uint8_t texCoordIndex = 0;
     uint8_t texGen = 0;                  // D3DTSS_TCI_* >> 16 (0 = passthru)
     uint8_t texXform = 0;                // D3DTTFF count (0 = disabled)
@@ -81,9 +83,11 @@ struct ShaderKey {
             sk.colorOp = uint8_t(st.values[D3DTSS_COLOROP]);
             sk.colorArg1 = uint8_t(st.values[D3DTSS_COLORARG1] & 0xFF);
             sk.colorArg2 = uint8_t(st.values[D3DTSS_COLORARG2] & 0xFF);
+            sk.colorArg0 = uint8_t(st.values[D3DTSS_COLORARG0] & 0xFF);
             sk.alphaOp = uint8_t(st.values[D3DTSS_ALPHAOP]);
             sk.alphaArg1 = uint8_t(st.values[D3DTSS_ALPHAARG1] & 0xFF);
             sk.alphaArg2 = uint8_t(st.values[D3DTSS_ALPHAARG2] & 0xFF);
+            sk.alphaArg0 = uint8_t(st.values[D3DTSS_ALPHAARG0] & 0xFF);
             sk.texCoordIndex = uint8_t(st.values[D3DTSS_TEXCOORDINDEX] & 0xFF);
             // Texgen + texture-coordinate transform. The pre-transformed UI path
             // never uses either — zero them there so UI keys stay stable.
