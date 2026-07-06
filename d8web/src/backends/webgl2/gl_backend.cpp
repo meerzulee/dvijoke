@@ -9,11 +9,38 @@
 #include "glsl_emitter.h"
 
 #ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 #endif
 #include <GLES3/gl3.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstdint>
+#include <vector>
+
+// Debug flags. On the web they are page globals (set `window.D8WEB_TRACE = 1`
+// in the console before the engine script loads) — Module.ENV/getenv isn't
+// wired up in a default Emscripten build. Native builds use real env vars.
+static bool d8webFlag(const char *name) {
+#ifdef __EMSCRIPTEN__
+    return EM_ASM_INT({
+        var n = UTF8ToString($0);
+        return (typeof window !== 'undefined' && window[n]) ? 1 : 0;
+    }, name) != 0;
+#else
+    const char *e = std::getenv(name);
+    return e && *e && *e != '0';
+#endif
+}
+
+// Per-frame logging is off unless D8WEB_TRACE is set — at ~27 logs/frame the
+// wasm->JS->console crossings cost frame time and Chrome retains every line.
+static bool d8webTrace() {
+    static const bool on = d8webFlag("D8WEB_TRACE");
+    return on;
+}
+
 #include <unordered_map>
 #include <vector>
 
@@ -21,6 +48,107 @@ namespace d8web {
 namespace {
 
 using webgl2::emitGLSL;
+
+// ---- CPU DXT (BC1/BC2/BC3) decode — fallback for GPUs without the S3TC
+// extension (most Android Mali/Adreno). Output is RGBA8.
+
+static void d8webDecodeColorBlock(const uint8_t *b, uint8_t out[16][4], bool dxt1) {
+    const uint16_t c0 = uint16_t(b[0] | (b[1] << 8));
+    const uint16_t c1 = uint16_t(b[2] | (b[3] << 8));
+    uint8_t col[4][4];
+    auto expand565 = [](uint16_t c, uint8_t *o) {
+        o[0] = uint8_t((((c >> 11) & 31) * 255 + 15) / 31);
+        o[1] = uint8_t((((c >> 5) & 63) * 255 + 31) / 63);
+        o[2] = uint8_t(((c & 31) * 255 + 15) / 31);
+        o[3] = 255;
+    };
+    expand565(c0, col[0]);
+    expand565(c1, col[1]);
+    if (!dxt1 || c0 > c1) {
+        for (int i = 0; i < 3; i++) {
+            col[2][i] = uint8_t((2 * col[0][i] + col[1][i]) / 3);
+            col[3][i] = uint8_t((col[0][i] + 2 * col[1][i]) / 3);
+        }
+        col[2][3] = 255;
+        col[3][3] = 255;
+    } else {
+        // DXT1 3-color mode: index 3 = transparent black (punch-through).
+        for (int i = 0; i < 3; i++) {
+            col[2][i] = uint8_t((col[0][i] + col[1][i]) / 2);
+            col[3][i] = 0;
+        }
+        col[2][3] = 255;
+        col[3][3] = 0;
+    }
+    const uint32_t bits = uint32_t(b[4]) | (uint32_t(b[5]) << 8)
+                        | (uint32_t(b[6]) << 16) | (uint32_t(b[7]) << 24);
+    for (int t = 0; t < 16; t++) {
+        const int idx = (bits >> (t * 2)) & 3;
+        out[t][0] = col[idx][0];
+        out[t][1] = col[idx][1];
+        out[t][2] = col[idx][2];
+        out[t][3] = col[idx][3];
+    }
+}
+
+static void d8webDecodeAlphaBlockDXT5(const uint8_t *b, uint8_t alpha[16]) {
+    const uint8_t a0 = b[0], a1 = b[1];
+    uint8_t pal[8];
+    pal[0] = a0;
+    pal[1] = a1;
+    if (a0 > a1) {
+        for (int i = 1; i < 7; i++) pal[i + 1] = uint8_t(((7 - i) * a0 + i * a1) / 7);
+    } else {
+        for (int i = 1; i < 5; i++) pal[i + 1] = uint8_t(((5 - i) * a0 + i * a1) / 5);
+        pal[6] = 0;
+        pal[7] = 255;
+    }
+    uint64_t bits = 0;
+    for (int i = 0; i < 6; i++) bits |= uint64_t(b[2 + i]) << (8 * i);
+    for (int t = 0; t < 16; t++) alpha[t] = pal[(bits >> (t * 3)) & 7];
+}
+
+static void d8webDecodeDXT(TexFormat fmt, UINT width, UINT height,
+                           const void *src, uint8_t *dst) {
+    const uint8_t *s = (const uint8_t *)src;
+    const UINT bw = (width + 3) / 4, bh = (height + 3) / 4;
+    const size_t blockSize = (fmt == TexFormat::DXT1) ? 8 : 16;
+    for (UINT by = 0; by < bh; by++) {
+        for (UINT bx = 0; bx < bw; bx++) {
+            const uint8_t *b = s + (size_t(by) * bw + bx) * blockSize;
+            uint8_t texel[16][4];
+            uint8_t alpha[16];
+            bool hasAlpha = false;
+            if (fmt == TexFormat::DXT3) {
+                for (int t = 0; t < 16; t++) {
+                    const uint8_t nib = (b[t / 2] >> ((t & 1) * 4)) & 15;
+                    alpha[t] = uint8_t(nib * 17);
+                }
+                hasAlpha = true;
+                b += 8;
+            } else if (fmt == TexFormat::DXT5) {
+                d8webDecodeAlphaBlockDXT5(b, alpha);
+                hasAlpha = true;
+                b += 8;
+            }
+            d8webDecodeColorBlock(b, texel, fmt == TexFormat::DXT1);
+            if (hasAlpha)
+                for (int t = 0; t < 16; t++) texel[t][3] = alpha[t];
+            for (int py = 0; py < 4; py++) {
+                const UINT y = by * 4 + UINT(py);
+                if (y >= height) break;
+                for (int px = 0; px < 4; px++) {
+                    const UINT x = bx * 4 + UINT(px);
+                    if (x >= width) continue;
+                    uint8_t *d = dst + (size_t(y) * width + x) * 4;
+                    const uint8_t *t = texel[py * 4 + px];
+                    d[0] = t[0]; d[1] = t[1]; d[2] = t[2]; d[3] = t[3];
+                }
+            }
+        }
+    }
+}
+
 
 struct Program {
     GLuint prog = 0;
@@ -136,7 +264,15 @@ public:
         emscripten_webgl_make_context_current(m_ctx);
         // DXT texture support is an extension WebGL only activates on request
         bool s3tc = emscripten_webgl_enable_extension(m_ctx, "WEBGL_compressed_texture_s3tc");
-        std::fprintf(stderr, "[d8web] S3TC/DXT extension: %s\n", s3tc ? "enabled" : "UNAVAILABLE");
+        // D8WEB_NO_S3TC (page: window.D8WEB_NO_S3TC = 1) forces the CPU decode
+        // path — for testing the mobile fallback on a desktop GPU.
+        if (s3tc && d8webFlag("D8WEB_NO_S3TC")) {
+            s3tc = false;
+            std::fprintf(stderr, "[d8web] S3TC force-disabled (D8WEB_NO_S3TC)\n");
+        }
+        m_s3tc = s3tc;
+        std::fprintf(stderr, "[d8web] S3TC/DXT extension: %s\n",
+                     s3tc ? "enabled" : "UNAVAILABLE — CPU DXT decode fallback");
 #endif
         m_width = width;
         m_height = height;
@@ -249,8 +385,18 @@ public:
             case TexFormat::DXT1:
             case TexFormat::DXT3:
             case TexFormat::DXT5: {
-                // Requires WEBGL_compressed_texture_s3tc (enabled at context init by
-                // Emscripten when available). Frontend CPU-decompresses as fallback.
+                if (!m_s3tc) {
+                    // No S3TC on this GPU (most mobile): decode the DXT blocks
+                    // on the CPU and upload plain RGBA8. DXT storage is created
+                    // lazily per level on either path.
+                    std::vector<uint8_t> rgba(size_t(width) * height * 4);
+                    d8webDecodeDXT(format, width, height, data, rgba.data());
+                    glTexImage2D(GL_TEXTURE_2D, GLint(level), GL_RGBA8,
+                                 GLsizei(width), GLsizei(height), 0,
+                                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+                    break;
+                }
+                // Requires WEBGL_compressed_texture_s3tc (enabled at context init).
                 GLenum fmt = (format == TexFormat::DXT1)   ? 0x83F1   // COMPRESSED_RGBA_S3TC_DXT1
                              : (format == TexFormat::DXT3) ? 0x83F2   // DXT3
                                                            : 0x83F3;  // DXT5
@@ -297,7 +443,8 @@ public:
             glClearStencil(GLint(stencilValue));
             mask |= GL_STENCIL_BUFFER_BIT;
         }
-        if (++m_clearCount <= 3 || m_clearCount % 300 == 0)
+        ++m_clearCount;
+        if (d8webTrace() && (m_clearCount <= 3 || m_clearCount % 300 == 0))
             std::fprintf(stderr, "[d8web] clear #%llu argb=0x%08X vp=%ux%u\n",
                          (unsigned long long)m_clearCount, argb, m_viewport.Width, m_viewport.Height);
         // Clear respects scissor, not viewport, in GL; D3D Clear clears the viewport.
@@ -322,7 +469,8 @@ public:
         const UINT vertexCount = geo.primCount == 0 ? 0 : vertexCountFor(geo.primitive, geo.primCount);
         if (vertexCount == 0) return;
 
-        if (++m_drawCount <= 5 || m_drawCount % 500 == 0)
+        ++m_drawCount;
+        if (d8webTrace() && (m_drawCount <= 5 || m_drawCount % 500 == 0))
             std::fprintf(stderr, "[d8web] draw #%llu prim=%d verts=%u tex0=%u prog=%u cull=%u rhw=%d\n",
                          (unsigned long long)m_drawCount, int(geo.primitive), vertexCount,
                          s.textures[0], prog.prog, s.rs[D3DRS_CULLMODE], int(key.preTransformed));
@@ -657,6 +805,7 @@ private:
     uint64_t m_drawCount = 0;
     uint64_t m_clearCount = 0;
     uint64_t m_texUploads = 0;
+    bool m_s3tc = true;
     D3DVIEWPORT8 m_viewport{};
     std::vector<BufferSlot> m_buffers;
     std::vector<TextureSlot> m_textures;
