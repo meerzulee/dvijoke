@@ -261,6 +261,8 @@ public:
         }
     }
     ~Texture8() override {
+        for (Surface8* s : m_levelSurfaces)
+            if (s) s->release();  // drop the owner ref
         if (m_handle) m_backend->destroyTexture(m_handle);
     }
 
@@ -285,8 +287,18 @@ public:
 
     HRESULT GetSurfaceLevel(UINT level, IDirect3DSurface8** surface) override {
         if (!surface || level >= m_levels) return D3DERR_INVALIDCALL;
-        *surface = new Surface8(this, level, std::max(1u, m_width >> level),
-                                std::max(1u, m_height >> level), m_format);
+        // D3D8 contract: level surfaces are owned by the texture — a caller's
+        // Release() must not invalidate them while the texture lives. (The
+        // engine's D3DXFilterTexture releases a level then keeps using it as
+        // the next mip's source; a fresh-object-per-call here means
+        // use-after-free and garbage mip chains.)
+        if (m_levelSurfaces.empty()) m_levelSurfaces.resize(m_levels, nullptr);
+        Surface8*& s = m_levelSurfaces[level];
+        if (!s)
+            s = new Surface8(this, level, std::max(1u, m_width >> level),
+                             std::max(1u, m_height >> level), m_format);  // owner ref
+        s->addRef();
+        *surface = s;
         return D3D_OK;
     }
 
@@ -321,6 +333,53 @@ public:
         if (!formatInfo(m_format, fi)) return;
         UINT w = std::max(1u, m_width >> level), h = std::max(1u, m_height >> level);
         std::vector<BYTE>& src = m_shadow[level];
+#ifdef __EMSCRIPTEN__
+        // Per-mip content probe for big 1555 textures (terrain atlas).
+        if (m_format == D3DFMT_A1R5G5B5 && level > 0 && (m_width >> 0) >= 512) {
+            const uint16_t* px = reinterpret_cast<const uint16_t*>(src.data());
+            UINT colored = 0, total = 0;
+            for (UINT i = 0; i < w * h; i += 7, ++total)
+                if ((px[i] & 0x7FFF) != 0) ++colored;
+            std::fprintf(stderr, "[ATLAS_MIP] h=%u level=%u %ux%u colored=%u%%\n",
+                         (unsigned)m_handle, level, w, h, total ? colored * 100 / total : 0);
+        }
+        // Terrain-atlas content probe: report how much of a big 1555 atlas is
+        // actually colored after each bake, in 8 horizontal bands.
+        if (m_format == D3DFMT_A1R5G5B5 && level == 0 && w >= 512) {
+            const uint16_t* px = reinterpret_cast<const uint16_t*>(src.data());
+            char bands[64]; int bp = 0;
+            for (UINT band = 0; band < 8; ++band) {
+                UINT y0 = h * band / 8, y1 = h * (band + 1) / 8, colored = 0, total = 0;
+                for (UINT y = y0; y < y1; y += 4)
+                    for (UINT x = 0; x < w; x += 4, ++total)
+                        if ((px[y * w + x] & 0x7FFF) != 0) ++colored;
+                bp += std::snprintf(bands + bp, sizeof(bands) - bp, "%u%%,",
+                                    total ? colored * 100 / total : 0);
+            }
+            std::fprintf(stderr, "[ATLAS_BANDS] h=%u %ux%u colored per band: %s\n",
+                         (unsigned)m_handle, w, h, bands);
+            // Dump a 4x-downscaled RGBA copy to the wasm FS so the test page can
+            // draw it on a canvas — "look at the atlas the GPU sees".
+            UINT dw = w / 4, dh = h / 4;
+            std::vector<BYTE> rgba(size_t(dw) * dh * 4);
+            for (UINT y = 0; y < dh; ++y)
+                for (UINT x = 0; x < dw; ++x) {
+                    uint16_t v = px[(y * 4) * w + (x * 4)];
+                    BYTE* o = rgba.data() + (size_t(y) * dw + x) * 4;
+                    o[0] = BYTE(((v >> 10) & 0x1F) << 3);
+                    o[1] = BYTE(((v >> 5) & 0x1F) << 3);
+                    o[2] = BYTE((v & 0x1F) << 3);
+                    o[3] = 0xFF;
+                }
+            char path[64];
+            std::snprintf(path, sizeof(path), "/atlas_%u_%ux%u.raw", (unsigned)m_handle, dw, dh);
+            if (FILE* f = std::fopen(path, "wb")) {
+                std::fwrite(rgba.data(), 1, rgba.size(), f);
+                std::fclose(f);
+                std::fprintf(stderr, "[ATLAS_DUMP] %s\n", path);
+            }
+        }
+#endif
         if (m_format == D3DFMT_L8 || m_format == D3DFMT_A8L8) {
             // Luminance formats: expand to RGBA8 (see formatInfo).
             const UINT n = w * h;
@@ -362,6 +421,7 @@ private:
     UINT m_lockedLevel = 0;
     std::vector<std::vector<BYTE>> m_shadow;
     std::vector<BYTE> m_scratch;
+    std::vector<Surface8*> m_levelSurfaces;  // texture-owned level views
 };
 
 HRESULT Surface8::LockRect(D3DLOCKED_RECT* locked, const RECT* rect, DWORD flags) {

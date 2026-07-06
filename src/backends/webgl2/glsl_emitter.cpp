@@ -212,7 +212,10 @@ ShaderSource emitGLSL(const ShaderKey& key) {
     vs << "}\n";
 
     // ---------------- Fragment shader ----------------
-    fs << "#version 300 es\nprecision mediump float;\n" << kUniformBlock;
+    // highp: texture coordinates derived from camera-space positions (cloud/
+    // shroud texgen) carry large magnitudes; mediump interpolation quantizes
+    // their fractional part and the sampled texel drifts (codex finding).
+    fs << "#version 300 es\nprecision highp float;\n" << kUniformBlock;
     fs << "in vec4 vColor;\n";
     for (int i = 0; i < liveStages; ++i) fs << "in vec2 vTexS" << i << ";\n";
     if (key.fogLinear) fs << "in float vFogDist;\n";
