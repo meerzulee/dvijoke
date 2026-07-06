@@ -1,0 +1,10 @@
+# Build output
+build/
+build-*/
+*.o
+*.a
+*.wasm
+
+# Tooling
+.DS_Store
+compile_commands.json
